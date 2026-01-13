@@ -4152,6 +4152,30 @@ function showAISettings() {
   document.getElementById('ai-settings-modal').classList.add('active');
 }
 
+// Debug function - run debugKRNotes() in console to see all KR notes
+window.debugKRNotes = function() {
+  console.log('=== All KR Notes ===');
+  data.okrs.forEach((okr, oi) => {
+    console.log(`\nOKR ${oi + 1}: ${okr.category}`);
+    (okr.keyresults || []).forEach((kr, ki) => {
+      if (kr.notes) {
+        console.log(`  KR ${ki + 1}: ${kr.text}`);
+        console.log(`  Notes length: ${kr.notes.length} chars`);
+        console.log(`  Notes preview: ${kr.notes.substring(0, 200)}...`);
+      }
+    });
+  });
+};
+
+// Debug function - run debugAIContext() in console to see full AI context
+window.debugAIContext = function() {
+  const ctx = buildSystemPrompt();
+  console.log('=== Full AI Context ===');
+  console.log('Total length:', ctx.length, 'characters');
+  console.log(ctx);
+  return ctx;
+};
+
 function saveAISettings() {
   ANTHROPIC_API_KEY = document.getElementById('anthropic-api-key').value.trim();
   localStorage.setItem('anthropic_api_key', ANTHROPIC_API_KEY);
@@ -4198,12 +4222,16 @@ function buildSystemPrompt() {
         // Include extracted text from PDFs/text files
         kr.attachments.forEach(att => {
           if (att.extractedText) {
-            krLine += `\n    [Content from ${att.name}]: ${att.extractedText.substring(0, 2000)}${att.extractedText.length > 2000 ? '...' : ''}`;
+            krLine += `\n    [Content from ${att.name}]: ${att.extractedText.substring(0, 8000)}${att.extractedText.length > 8000 ? '...' : ''}`;
           }
         });
       }
       // Include notes if any
       if (kr.notes) {
+        // Log long notes for debugging
+        if (kr.notes.length > 500) {
+          console.log(`KR "${kr.text}" has ${kr.notes.length} chars of notes`);
+        }
         krLine += `\n    Notes: ${kr.notes}`;
       }
       return krLine;
@@ -4233,7 +4261,7 @@ function buildSystemPrompt() {
         folder.items.forEach(item => {
           foldersContext += `  - ${item.type === 'pdf' ? '📄' : '📝'} ${item.name}\n`;
           if (item.content) {
-            foldersContext += `    Content: ${item.content.substring(0, 1500)}${item.content.length > 1500 ? '...' : ''}\n`;
+            foldersContext += `    Content: ${item.content.substring(0, 8000)}${item.content.length > 8000 ? '...' : ''}\n`;
           }
         });
       }
@@ -4576,10 +4604,22 @@ async function sendAIMessage() {
       document.getElementById('ai-typing').querySelector('div:last-child').textContent = '🔍 Searching the web...';
     }
     
+    const systemPrompt = buildSystemPrompt();
+    console.log('📊 AI Context Length:', systemPrompt.length, 'characters');
+    console.log('📋 AI Context Preview (first 500 chars):', systemPrompt.substring(0, 500));
+    console.log('📋 AI Context Preview (last 500 chars):', systemPrompt.substring(systemPrompt.length - 500));
+    
+    // Log if KR notes containing "transcript" are found
+    if (systemPrompt.toLowerCase().includes('transcript')) {
+      console.log('✅ Found "transcript" in AI context');
+    } else {
+      console.log('❌ "transcript" NOT found in AI context');
+    }
+    
     const requestBody = {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: buildSystemPrompt(),
+      system: systemPrompt,
       messages: chatHistory
     };
     
@@ -5033,7 +5073,7 @@ function buildFullContextPrompt() {
         krLine += `\n    Attachments: ${kr.attachments.map(a => a.name).join(', ')}`;
         kr.attachments.forEach(att => {
           if (att.extractedText) {
-            krLine += `\n    [${att.name}]: ${att.extractedText.substring(0, 1500)}...`;
+            krLine += `\n    [${att.name}]: ${att.extractedText.substring(0, 8000)}${att.extractedText.length > 8000 ? '...' : ''}`;
           }
         });
       }
@@ -5057,7 +5097,7 @@ function buildFullContextPrompt() {
         folder.items.forEach(item => {
           foldersContext += `  - ${item.type === 'pdf' ? '📄' : '📝'} ${item.name}\n`;
           if (item.content) {
-            foldersContext += `    Content: ${item.content.substring(0, 2000)}${item.content.length > 2000 ? '...' : ''}\n`;
+            foldersContext += `    Content: ${item.content.substring(0, 8000)}${item.content.length > 8000 ? '...' : ''}\n`;
           }
         });
       } else {
@@ -5091,7 +5131,7 @@ function buildFullContextPrompt() {
   if (data.notes && data.notes.length > 0) {
     notesContext = '\n\n## NOTES (' + data.notes.length + ' total)\n';
     data.notes.forEach(n => {
-      notesContext += `\n### ${n.title} (${n.date}) [${n.tag}]\n${n.content.substring(0, 500)}${n.content.length > 500 ? '...' : ''}\n`;
+      notesContext += `\n### ${n.title} (${n.date}) [${n.tag}]\n${n.content.substring(0, 5000)}${n.content.length > 5000 ? '...' : ''}\n`;
     });
   }
 
