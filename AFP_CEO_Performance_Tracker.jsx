@@ -4216,53 +4216,70 @@ function buildSystemPrompt() {
   // Include notes from Notes tab
   let notesContext = '';
   if (data.notes && data.notes.length > 0) {
-    notesContext = '\n\n## Recent Notes\n' + data.notes.slice(0, 5).map(n => 
-      `- ${n.title} (${n.date}): ${n.content.substring(0, 200)}${n.content.length > 200 ? '...' : ''}`
+    notesContext = '\n\n## Notes (' + data.notes.length + ' total)\n' + data.notes.map(n => 
+      `- ${n.title} (${n.date}) [${n.tag}]: ${n.content.substring(0, 300)}${n.content.length > 300 ? '...' : ''}`
     ).join('\n');
   }
 
-  // Include calendar events (upcoming and recent)
+  // Include ALL folders and their contents
+  let foldersContext = '';
+  if (data.folders && data.folders.length > 0) {
+    foldersContext = '\n\n## Folders & Documents (' + data.folders.length + ' folders)\n';
+    data.folders.forEach(folder => {
+      foldersContext += `\n### 📁 ${folder.name}`;
+      if (folder.description) foldersContext += ` (${folder.description})`;
+      foldersContext += '\n';
+      if (folder.items && folder.items.length > 0) {
+        folder.items.forEach(item => {
+          foldersContext += `  - ${item.type === 'pdf' ? '📄' : '📝'} ${item.name}\n`;
+          if (item.content) {
+            foldersContext += `    Content: ${item.content.substring(0, 1500)}${item.content.length > 1500 ? '...' : ''}\n`;
+          }
+        });
+      }
+    });
+  }
+
+  // Include calendar events (ALL events)
   let calendarContext = '';
   if (data.events && data.events.length > 0) {
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    const nextWeek = new Date(todayDate);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    
-    // Get events from today through next 7 days
-    const upcomingEvents = data.events
-      .filter(e => {
-        const eventDate = new Date(e.date);
-        eventDate.setHours(0, 0, 0, 0);
-        return eventDate >= todayDate && eventDate <= nextWeek;
-      })
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    if (upcomingEvents.length > 0) {
-      calendarContext = '\n\n## Upcoming Schedule (Next 7 Days)\n';
-      upcomingEvents.forEach(e => {
-        const eventDate = new Date(e.date);
-        const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        let eventLine = `- ${dateStr}: ${e.title}`;
-        if (e.time) eventLine += ` (${e.time})`;
-        if (e.location) eventLine += ` @ ${e.location.substring(0, 50)}`;
-        if (e.invitees && e.invitees.length > 0) {
-          eventLine += ` [${e.invitees.length} attendees: ${e.invitees.slice(0, 3).map(i => i.split(' ')[0]).join(', ')}${e.invitees.length > 3 ? '...' : ''}]`;
-        }
-        if (e.organizer) eventLine += ` (Organizer: ${e.organizer.split('<')[0].trim()})`;
-        if (e.conflicts) eventLine += ` ⚠️ ${e.conflicts}`;
-        calendarContext += eventLine + '\n';
-      });
-    }
+    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+    calendarContext = '\n\n## Calendar Events (' + sortedEvents.length + ' total)\n';
+    sortedEvents.forEach(e => {
+      const eventDate = new Date(e.date);
+      const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      let eventLine = `- ${dateStr}: ${e.title}`;
+      if (e.time) eventLine += ` (${e.time})`;
+      if (e.location) eventLine += ` @ ${e.location.substring(0, 50)}`;
+      if (e.invitees && e.invitees.length > 0) {
+        eventLine += ` [${e.invitees.length} attendees: ${e.invitees.slice(0, 5).join(', ')}${e.invitees.length > 5 ? '...' : ''}]`;
+      }
+      if (e.organizer) eventLine += ` (Organizer: ${e.organizer.split('<')[0].trim()})`;
+      if (e.conflicts) eventLine += ` ⚠️ ${e.conflicts}`;
+      calendarContext += eventLine + '\n';
+    });
+  }
+
+  // Include expenses summary
+  let expensesContext = '';
+  if (data.expenses && data.expenses.length > 0) {
+    const total = data.expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    expensesContext = '\n\n## Expenses (Total: $' + total.toLocaleString() + ')\n';
+    data.expenses.slice(0, 15).forEach(e => {
+      expensesContext += `- ${e.date}: ${e.description} - $${e.amount} (${e.category})\n`;
+    });
   }
 
   return `You are an AI Performance Coach for Art Taylor, CEO of AFP Global. Today is ${today}.
+You have FULL ACCESS to: OKRs, folders, documents, calendar events, notes, and expenses.
+
 Overall Progress: ${overallProgress}%
-${okrDetails}${notesContext}${calendarContext}
+${okrDetails}${foldersContext}${calendarContext}${notesContext}${expensesContext}
 
 Be concise. Use specific numbers. Identify risks. Give practical recommendations.
-When asked about schedule/calendar, reference the Upcoming Schedule section.
-When asked "what's on my calendar", "when do I meet with...", "what meetings do I have", etc., search the schedule data.`;
+When asked about schedule/calendar/meetings, search the Calendar Events.
+When asked about documents/folders/files, search the Folders & Documents.
+When asked about specific people, search all sections for their name.`;
 }
 
 async function cleanupNotes(textareaId) {
@@ -4709,6 +4726,398 @@ async function saveResponseToFolder() {
 }
 
 init();
+</script>
+
+<!-- Floating AI Button and Panel -->
+<style>
+.floating-ai-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.floating-ai-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6);
+}
+.floating-ai-btn.has-unread::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 12px;
+  height: 12px;
+  background: #e74c3c;
+  border-radius: 50%;
+  border: 2px solid #1a1a2e;
+}
+
+.floating-ai-panel {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  height: 500px;
+  max-height: calc(100vh - 150px);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 16px;
+  box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+  z-index: 9999;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.floating-ai-panel.active {
+  display: flex;
+}
+.floating-ai-header {
+  padding: 16px;
+  background: rgba(0,0,0,0.2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.floating-ai-header h3 {
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.floating-ai-close {
+  background: none;
+  border: none;
+  color: #e8e8e8;
+  font-size: 24px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.floating-ai-close:hover { opacity: 1; }
+.floating-ai-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.floating-ai-input-area {
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  gap: 8px;
+}
+.floating-ai-input {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.05);
+  color: #e8e8e8;
+  font-size: 14px;
+  resize: none;
+}
+.floating-ai-send {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.floating-quick-btns {
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.floating-quick-btn {
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #e8e8e8;
+}
+.floating-quick-btn:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+@media (max-width: 500px) {
+  .floating-ai-panel {
+    right: 12px;
+    bottom: 90px;
+    width: calc(100vw - 24px);
+    height: calc(100vh - 120px);
+  }
+  .floating-ai-btn {
+    right: 16px;
+    bottom: 16px;
+    width: 56px;
+    height: 56px;
+  }
+}
+</style>
+
+<button class="floating-ai-btn" onclick="toggleFloatingAI()" title="AI Assistant">🤖</button>
+
+<div class="floating-ai-panel" id="floating-ai-panel">
+  <div class="floating-ai-header">
+    <h3>🤖 AI Assistant</h3>
+    <button class="floating-ai-close" onclick="toggleFloatingAI()">×</button>
+  </div>
+  <div class="floating-quick-btns">
+    <button class="floating-quick-btn" onclick="floatingAskAI('How am I tracking overall?')">📊 Progress</button>
+    <button class="floating-quick-btn" onclick="floatingAskAI('What should I focus on?')">🎯 Focus</button>
+    <button class="floating-quick-btn" onclick="floatingAskAI('What meetings do I have this week?')">📅 Schedule</button>
+    <button class="floating-quick-btn" onclick="floatingAskAI('Summarize my folders and documents')">📁 Folders</button>
+    <button class="floating-quick-btn" onclick="floatingAskAI('What are my key risks?')">⚠️ Risks</button>
+  </div>
+  <div class="floating-ai-messages" id="floating-ai-messages">
+    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+      <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">🤖</div>
+      <div style="background: rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5;">
+        <p>Hi! I have access to all your OKRs, folders, documents, calendar, and notes. How can I help?</p>
+      </div>
+    </div>
+  </div>
+  <div class="floating-ai-input-area">
+    <textarea class="floating-ai-input" id="floating-ai-input" placeholder="Ask anything..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendFloatingAIMessage();}"></textarea>
+    <button class="floating-ai-send" onclick="sendFloatingAIMessage()">→</button>
+  </div>
+</div>
+
+<script>
+let floatingChatHistory = [];
+
+function toggleFloatingAI() {
+  const panel = document.getElementById('floating-ai-panel');
+  panel.classList.toggle('active');
+  if (panel.classList.contains('active')) {
+    document.getElementById('floating-ai-input').focus();
+  }
+}
+
+function floatingAskAI(question) {
+  document.getElementById('floating-ai-input').value = question;
+  sendFloatingAIMessage();
+}
+
+function addFloatingChatMessage(role, content) {
+  const container = document.getElementById('floating-ai-messages');
+  const div = document.createElement('div');
+  div.style.cssText = 'display: flex; gap: 12px; margin-bottom: 16px;';
+  
+  if (role === 'user') {
+    div.innerHTML = `
+      <div style="margin-left: auto; background: linear-gradient(135deg, #4facfe, #00f2fe); padding: 10px 14px; border-radius: 12px; font-size: 13px; max-width: 85%; color: #1a1a2e;">${content}</div>
+    `;
+  } else {
+    div.innerHTML = `
+      <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">🤖</div>
+      <div style="background: rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 85%;">${content}</div>
+    `;
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendFloatingAIMessage() {
+  const input = document.getElementById('floating-ai-input');
+  const message = input.value.trim();
+  if (!message) return;
+  
+  if (!ANTHROPIC_API_KEY) {
+    alert('Please set your API key: Go to AI Assistant tab → ⚙️ API Key');
+    return;
+  }
+  
+  addFloatingChatMessage('user', message);
+  input.value = '';
+  
+  // Add typing indicator
+  const typing = document.createElement('div');
+  typing.id = 'floating-typing';
+  typing.style.cssText = 'display: flex; gap: 12px; margin-bottom: 16px;';
+  typing.innerHTML = `
+    <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">🤖</div>
+    <div style="background: rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 12px; font-size: 13px;">Thinking...</div>
+  `;
+  document.getElementById('floating-ai-messages').appendChild(typing);
+  
+  try {
+    floatingChatHistory.push({ role: 'user', content: message });
+    
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        system: buildFullContextPrompt(),
+        messages: floatingChatHistory
+      })
+    });
+    
+    const result = await response.json();
+    document.getElementById('floating-typing')?.remove();
+    
+    if (result.error) {
+      addFloatingChatMessage('assistant', '❌ Error: ' + result.error.message);
+      return;
+    }
+    
+    const aiResponse = result.content[0].text;
+    floatingChatHistory.push({ role: 'assistant', content: aiResponse });
+    
+    // Format response with markdown-like styling
+    const formattedResponse = aiResponse
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+    
+    addFloatingChatMessage('assistant', formattedResponse);
+    
+  } catch (error) {
+    document.getElementById('floating-typing')?.remove();
+    addFloatingChatMessage('assistant', '❌ Error: ' + error.message);
+  }
+}
+
+// Build comprehensive context with ALL tracker data
+function buildFullContextPrompt() {
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  
+  // Calculate overall progress
+  let totalWeighted = 0, totalWeight = 0;
+  data.okrs.forEach(okr => {
+    const progress = calculateOKRProgress(okr);
+    totalWeighted += progress * (okr.weight || 0);
+    totalWeight += okr.weight || 0;
+  });
+  const overallProgress = totalWeight > 0 ? Math.round(totalWeighted / totalWeight) : 0;
+  
+  // OKR Details with ALL data
+  let okrDetails = data.okrs.map(okr => {
+    const progress = calculateOKRProgress(okr);
+    const krs = (okr.keyresults || []).map(kr => {
+      const krProgress = kr.target > 0 ? Math.round((kr.current / kr.target) * 100) : 0;
+      let krLine = `  - ${kr.text}: ${kr.current}/${kr.target} ${kr.unit} (${krProgress}%)${kr.complete ? ' ✓' : ''}`;
+      if (kr.description) krLine += `\n    Description: ${kr.description}`;
+      if (kr.items && kr.items.length > 0) {
+        krLine += `\n    Items (${kr.items.length}):`;
+        kr.items.forEach(item => {
+          krLine += `\n      • ${item.name} [${item.status || 'In Progress'}]`;
+          if (item.notes) krLine += `: ${item.notes.substring(0, 200)}`;
+        });
+      }
+      if (kr.attachments && kr.attachments.length > 0) {
+        krLine += `\n    Attachments: ${kr.attachments.map(a => a.name).join(', ')}`;
+        kr.attachments.forEach(att => {
+          if (att.extractedText) {
+            krLine += `\n    [${att.name}]: ${att.extractedText.substring(0, 1500)}...`;
+          }
+        });
+      }
+      if (kr.notes) krLine += `\n    Notes: ${kr.notes}`;
+      return krLine;
+    }).join('\n');
+    let section = `\n## ${okr.category} (${okr.weight}%) - ${progress}%\n${okr.objective}\n${krs}`;
+    if (okr.notes) section += `\nObjective Notes: ${okr.notes}`;
+    return section;
+  }).join('\n');
+
+  // ALL Folders with contents
+  let foldersContext = '';
+  if (data.folders && data.folders.length > 0) {
+    foldersContext = '\n\n## FOLDERS & DOCUMENTS\n';
+    data.folders.forEach(folder => {
+      foldersContext += `\n### 📁 ${folder.name}`;
+      if (folder.description) foldersContext += ` (${folder.description})`;
+      foldersContext += '\n';
+      if (folder.items && folder.items.length > 0) {
+        folder.items.forEach(item => {
+          foldersContext += `  - ${item.type === 'pdf' ? '📄' : '📝'} ${item.name}\n`;
+          if (item.content) {
+            foldersContext += `    Content: ${item.content.substring(0, 2000)}${item.content.length > 2000 ? '...' : ''}\n`;
+          }
+        });
+      } else {
+        foldersContext += '  (empty)\n';
+      }
+    });
+  }
+
+  // ALL Calendar Events
+  let calendarContext = '';
+  if (data.events && data.events.length > 0) {
+    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+    calendarContext = '\n\n## CALENDAR EVENTS (' + sortedEvents.length + ' total)\n';
+    sortedEvents.forEach(e => {
+      const eventDate = new Date(e.date);
+      const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      calendarContext += `\n### ${dateStr}: ${e.title}\n`;
+      if (e.time) calendarContext += `- Time: ${e.time}\n`;
+      if (e.location) calendarContext += `- Location: ${e.location}\n`;
+      if (e.organizer) calendarContext += `- Organizer: ${e.organizer}\n`;
+      if (e.invitees && e.invitees.length > 0) {
+        calendarContext += `- Attendees (${e.invitees.length}): ${e.invitees.slice(0, 10).join(', ')}${e.invitees.length > 10 ? '...' : ''}\n`;
+      }
+      if (e.notes) calendarContext += `- Notes: ${e.notes}\n`;
+      if (e.conflicts) calendarContext += `- ⚠️ Conflicts: ${e.conflicts}\n`;
+    });
+  }
+
+  // ALL Notes
+  let notesContext = '';
+  if (data.notes && data.notes.length > 0) {
+    notesContext = '\n\n## NOTES (' + data.notes.length + ' total)\n';
+    data.notes.forEach(n => {
+      notesContext += `\n### ${n.title} (${n.date}) [${n.tag}]\n${n.content.substring(0, 500)}${n.content.length > 500 ? '...' : ''}\n`;
+    });
+  }
+
+  // ALL Expenses
+  let expensesContext = '';
+  if (data.expenses && data.expenses.length > 0) {
+    const total = data.expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    expensesContext = '\n\n## EXPENSES (Total: $' + total.toLocaleString() + ')\n';
+    data.expenses.slice(0, 20).forEach(e => {
+      expensesContext += `- ${e.date}: ${e.description} - $${e.amount} (${e.category})\n`;
+    });
+  }
+
+  return `You are an AI assistant for Art Taylor, CEO of AFP Global. Today is ${today}.
+You have FULL ACCESS to all tracker data including OKRs, folders, documents, calendar, notes, and expenses.
+
+## OVERALL PROGRESS: ${overallProgress}%
+
+${okrDetails}
+${foldersContext}
+${calendarContext}
+${notesContext}
+${expensesContext}
+
+Be concise, specific, and helpful. Reference specific data when answering. If asked about meetings, schedules, documents, folders, or any tracker content, search through the data above to provide accurate answers.`;
+}
 </script>
 </body>
 </html>
