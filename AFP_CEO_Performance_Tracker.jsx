@@ -2738,7 +2738,7 @@ function clearImportedEvents() {
 function showImportScheduleModal() {
   document.getElementById('schedule-text').value = '';
   document.getElementById('schedule-preview').style.display = 'none';
-  openModal('import-schedule-modal');
+  document.getElementById('import-schedule-modal').classList.add('active');
 }
 
 function parseCopilotSchedule(text) {
