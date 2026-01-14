@@ -742,10 +742,11 @@
   <div class="modal" id="event-modal">
     <div class="modal-content" style="max-width: 500px;">
       <div class="modal-header">
-        <h2>Add Event</h2>
+        <h2 id="event-modal-title">Add Event</h2>
         <button class="close-modal" onclick="closeModal('event-modal')">×</button>
       </div>
       <div class="modal-body">
+        <input type="hidden" id="event-id">
         <div class="edit-section">
           <label style="font-size: 13px; display: block; margin-bottom: 6px;">Event Title</label>
           <input type="text" id="event-title" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8;">
@@ -753,6 +754,20 @@
         <div class="edit-section">
           <label style="font-size: 13px; display: block; margin-bottom: 6px;">Date</label>
           <input type="date" id="event-date" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8;">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="edit-section">
+            <label style="font-size: 13px; display: block; margin-bottom: 6px;">Start Time</label>
+            <input type="time" id="event-start-time" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8;">
+          </div>
+          <div class="edit-section">
+            <label style="font-size: 13px; display: block; margin-bottom: 6px;">End Time</label>
+            <input type="time" id="event-end-time" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8;">
+          </div>
+        </div>
+        <div class="edit-section">
+          <label style="font-size: 13px; display: block; margin-bottom: 6px;">Location</label>
+          <input type="text" id="event-location" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8;">
         </div>
         <div class="edit-section">
           <label style="font-size: 13px; display: block; margin-bottom: 6px;">Type</label>
@@ -762,7 +777,12 @@
             <option value="speaking">Speaking</option>
             <option value="travel">Travel</option>
             <option value="deadline">Deadline</option>
+            <option value="personal">Personal</option>
           </select>
+        </div>
+        <div class="edit-section">
+          <label style="font-size: 13px; display: block; margin-bottom: 6px;">Notes</label>
+          <textarea id="event-notes" rows="3" style="width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #e8e8e8; resize: vertical;"></textarea>
         </div>
         <div class="btn-row-modal">
           <button class="btn-secondary" onclick="closeModal('event-modal')">Cancel</button>
@@ -3347,45 +3367,115 @@ function showEventDetails(eventId) {
   const e = data.events.find(ev => ev.id === eventId);
   if (!e) return;
   
-  let details = `📅 ${e.title}\n\n`;
-  details += `Date: ${new Date(e.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n`;
-  if (e.time) details += `Time: ${e.time}\n`;
-  if (e.location) details += `Location: ${e.location}\n`;
-  if (e.organizer) details += `Organizer: ${e.organizer}\n`;
-  if (e.invitees && e.invitees.length > 0) {
-    details += `\nAttendees (${e.invitees.length}):\n`;
-    e.invitees.slice(0, 10).forEach(inv => details += `  • ${inv}\n`);
-    if (e.invitees.length > 10) details += `  ... and ${e.invitees.length - 10} more\n`;
-  }
-  if (e.notes) details += `\nNotes: ${e.notes}\n`;
-  if (e.conflicts) details += `\n⚠️ Conflicts: ${e.conflicts}\n`;
+  // Populate modal for editing
+  document.getElementById('event-modal-title').textContent = '✏️ Edit Event';
+  document.getElementById('event-id').value = e.id;
+  document.getElementById('event-title').value = e.title || '';
+  document.getElementById('event-date').value = e.date || '';
+  document.getElementById('event-location').value = e.location || '';
+  document.getElementById('event-type').value = e.type || 'meeting';
+  document.getElementById('event-notes').value = e.notes || '';
   
-  alert(details);
+  // Parse time - could be "8:00 AM - 9:00 AM" or "8:00 AM" or "08:00"
+  let startTime = '';
+  let endTime = '';
+  if (e.startTime) {
+    startTime = convertTo24Hour(e.startTime);
+  } else if (e.time) {
+    const timeParts = e.time.split(' - ');
+    startTime = convertTo24Hour(timeParts[0]);
+    if (timeParts[1]) endTime = convertTo24Hour(timeParts[1]);
+  }
+  document.getElementById('event-start-time').value = startTime;
+  document.getElementById('event-end-time').value = endTime || e.endTime ? convertTo24Hour(e.endTime) : '';
+  
+  document.getElementById('event-modal').classList.add('active');
+}
+
+function convertTo24Hour(timeStr) {
+  if (!timeStr) return '';
+  timeStr = timeStr.trim();
+  
+  // Already in 24-hour format
+  if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+  
+  const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return '';
+  
+  let hours = parseInt(match[1]);
+  const minutes = match[2];
+  const period = match[3];
+  
+  if (period) {
+    if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+    if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+  }
+  
+  return String(hours).padStart(2, '0') + ':' + minutes;
+}
+
+function convertTo12Hour(timeStr) {
+  if (!timeStr) return '';
+  const [hours, minutes] = timeStr.split(':');
+  let h = parseInt(hours);
+  const period = h >= 12 ? 'PM' : 'AM';
+  if (h > 12) h -= 12;
+  if (h === 0) h = 12;
+  return `${h}:${minutes} ${period}`;
 }
 
 function showAddEventModal() {
+  document.getElementById('event-modal-title').textContent = '📅 Add Event';
+  document.getElementById('event-id').value = '';
   document.getElementById('event-title').value = '';
   document.getElementById('event-date').value = '';
+  document.getElementById('event-start-time').value = '';
+  document.getElementById('event-end-time').value = '';
+  document.getElementById('event-location').value = '';
   document.getElementById('event-type').value = 'meeting';
+  document.getElementById('event-notes').value = '';
   document.getElementById('event-modal').classList.add('active');
 }
 
 async function saveEvent() {
-  const event = {
-    id: 'evt_' + Date.now(),
-    title: document.getElementById('event-title').value,
-    date: document.getElementById('event-date').value,
-    type: document.getElementById('event-type').value
-  };
+  const existingId = document.getElementById('event-id').value;
+  const title = document.getElementById('event-title').value.trim();
+  const date = document.getElementById('event-date').value;
   
-  if (!event.title || !event.date) {
-    alert('Please fill in all fields');
+  if (!title || !date) {
+    alert('Please fill in title and date');
     return;
   }
   
-  data.events.push(event);
-  await saveToServer('saveEvent', { event });
+  const startTime = document.getElementById('event-start-time').value;
+  const endTime = document.getElementById('event-end-time').value;
+  const timeDisplay = startTime ? 
+    (endTime ? `${convertTo12Hour(startTime)} - ${convertTo12Hour(endTime)}` : convertTo12Hour(startTime)) : '';
   
+  const eventData = {
+    title: title,
+    date: date,
+    time: timeDisplay,
+    startTime: startTime ? convertTo12Hour(startTime) : '',
+    endTime: endTime ? convertTo12Hour(endTime) : '',
+    location: document.getElementById('event-location').value.trim(),
+    type: document.getElementById('event-type').value,
+    notes: document.getElementById('event-notes').value.trim()
+  };
+  
+  if (existingId) {
+    // Update existing event
+    const index = data.events.findIndex(e => e.id === existingId);
+    if (index !== -1) {
+      data.events[index] = { ...data.events[index], ...eventData };
+    }
+  } else {
+    // Add new event
+    eventData.id = 'evt_' + Date.now();
+    data.events.push(eventData);
+  }
+  
+  saveLocal();
   closeModal('event-modal');
   render();
 }
