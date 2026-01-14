@@ -3321,12 +3321,12 @@ function renderEvents() {
   
   const monthEvents = data.events
     .filter(e => {
-      const d = new Date(e.date);
+      const d = new Date(e.date + 'T12:00:00');
       return d.getFullYear() === year && d.getMonth() === month;
     })
     .sort((a, b) => {
       // Sort by date, then by time
-      const dateCompare = new Date(a.date) - new Date(b.date);
+      const dateCompare = new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
       if (dateCompare !== 0) return dateCompare;
       if (a.startTime && b.startTime) {
         return a.startTime.localeCompare(b.startTime);
@@ -3340,7 +3340,7 @@ function renderEvents() {
   }
   
   list.innerHTML = monthEvents.map(e => {
-    const date = new Date(e.date);
+    const date = new Date(e.date + 'T12:00:00');
     const hasDetails = e.time || e.location || e.invitees;
     return `
       <div class="event-item" style="cursor: pointer;" onclick="showEventDetails('${e.id}')">
@@ -3514,10 +3514,10 @@ function renderExpenses() {
   // Table
   const tbody = document.getElementById('expense-tbody');
   tbody.innerHTML = data.expenses
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .sort((a, b) => new Date(b.date + 'T12:00:00') - new Date(a.date + 'T12:00:00'))
     .map(e => `
       <tr>
-        <td>${new Date(e.date).toLocaleDateString()}</td>
+        <td>${new Date(e.date + 'T12:00:00').toLocaleDateString()}</td>
         <td>${e.description}${e.trip ? ` <small style="opacity:0.6">(${e.trip})</small>` : ''}</td>
         <td><span class="expense-category">${e.category}</span></td>
         <td class="expense-amount">$${parseFloat(e.amount).toLocaleString()}</td>
@@ -3861,7 +3861,7 @@ function renderNotes() {
   
   let notes = data.notes || [];
   if (filter) notes = notes.filter(n => n.tag === filter);
-  notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+  notes.sort((a, b) => new Date(b.date + 'T12:00:00') - new Date(a.date + 'T12:00:00'));
   
   if (notes.length === 0) {
     list.innerHTML = '<p style="opacity:0.5;text-align:center;padding:40px;">No notes yet. Click "+ New Note" to create one.</p>';
@@ -4377,10 +4377,10 @@ function buildSystemPrompt() {
   // Include calendar events (ALL events)
   let calendarContext = '';
   if (data.events && data.events.length > 0) {
-    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00'));
     calendarContext = '\n\n## Calendar Events (' + sortedEvents.length + ' total)\n';
     sortedEvents.forEach(e => {
-      const eventDate = new Date(e.date);
+      const eventDate = new Date(e.date + 'T12:00:00');
       const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       let eventLine = `- ${dateStr}: ${e.title}`;
       if (e.time) eventLine += ` (${e.time})`;
@@ -4647,12 +4647,12 @@ async function sendAIMessage() {
       }
       
       // Sort by date
-      relevantEvents = relevantEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+      relevantEvents = relevantEvents.sort((a, b) => new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00'));
       
       if (relevantEvents.length > 0) {
         calendarSearchContext = `\n\n## Matching Calendar Events (${relevantEvents.length} found):\n`;
         relevantEvents.slice(0, 20).forEach(e => {
-          const eventDate = new Date(e.date);
+          const eventDate = new Date(e.date + 'T12:00:00');
           const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
           calendarSearchContext += `\n### ${e.title}\n`;
           calendarSearchContext += `- Date: ${dateStr}\n`;
@@ -5215,10 +5215,10 @@ function buildFullContextPrompt() {
   // ALL Calendar Events
   let calendarContext = '';
   if (data.events && data.events.length > 0) {
-    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sortedEvents = [...data.events].sort((a, b) => new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00'));
     calendarContext = '\n\n## CALENDAR EVENTS (' + sortedEvents.length + ' total)\n';
     sortedEvents.forEach(e => {
-      const eventDate = new Date(e.date);
+      const eventDate = new Date(e.date + 'T12:00:00');
       const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       calendarContext += `\n### ${dateStr}: ${e.title}\n`;
       if (e.time) calendarContext += `- Time: ${e.time}\n`;
