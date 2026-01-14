@@ -7,8 +7,14 @@
   <!-- PDF.js library for extracting text from PDFs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
-    // Set PDF.js worker
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // Set PDF.js worker (with error handling for mobile)
+    try {
+      if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    } catch(e) {
+      console.warn('PDF.js not available:', e);
+    }
   </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -212,6 +218,16 @@
     <div class="spinner"></div>
     <p class="loading-text">Loading data...</p>
   </div>
+  <script>
+    // Fallback: force hide loading after 5 seconds if something fails
+    setTimeout(function() {
+      var loadEl = document.getElementById('loading');
+      if (loadEl && !loadEl.classList.contains('hidden')) {
+        console.warn('Loading timeout - forcing display');
+        loadEl.classList.add('hidden');
+      }
+    }, 5000);
+  </script>
 
   <!-- Setup Banner -->
   <div class="setup-banner" id="setup-banner" style="display:none;">
