@@ -4212,7 +4212,7 @@ function buildSystemPrompt() {
         kr.items.forEach(item => {
           krLine += `\n      • ${item.name} [${item.status || 'In Progress'}]`;
           if (item.notes) {
-            krLine += `: ${item.notes.substring(0, 200)}${item.notes.length > 200 ? '...' : ''}`;
+            krLine += `: ${item.notes.substring(0, 8000)}${item.notes.length > 8000 ? '...' : ''}`;
           }
         });
       }
@@ -5066,7 +5066,7 @@ function buildFullContextPrompt() {
         krLine += `\n    Items (${kr.items.length}):`;
         kr.items.forEach(item => {
           krLine += `\n      • ${item.name} [${item.status || 'In Progress'}]`;
-          if (item.notes) krLine += `: ${item.notes.substring(0, 200)}`;
+          if (item.notes) krLine += `: ${item.notes.substring(0, 8000)}${item.notes.length > 8000 ? '...' : ''}`;
         });
       }
       if (kr.attachments && kr.attachments.length > 0) {
