@@ -207,9 +207,31 @@
     .att-date { font-size: 10px; opacity: 0.5; }
     .att-view { background: none; border: none; color: #4facfe; cursor: pointer; font-size: 11px; padding: 4px 8px; }
     .att-delete { background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 16px; padding: 4px; }
+    
+    /* Drag and Drop Zone */
+    .drop-zone-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(79,172,254,0.15); z-index: 9999; align-items: center; justify-content: center; pointer-events: none; }
+    .drop-zone-overlay.active { display: flex; }
+    .drop-zone-box { background: rgba(26,26,46,0.95); border: 3px dashed #4facfe; border-radius: 20px; padding: 60px 80px; text-align: center; animation: pulse 1.5s infinite; }
+    .drop-zone-box .icon { font-size: 64px; margin-bottom: 16px; }
+    .drop-zone-box .text { font-size: 24px; font-weight: 600; color: #4facfe; }
+    .drop-zone-box .subtext { font-size: 14px; opacity: 0.7; margin-top: 8px; }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+    
+    /* Droppable areas highlight */
+    .droppable { transition: all 0.2s; }
+    .droppable.drag-over { background: rgba(79,172,254,0.2) !important; border-color: #4facfe !important; }
   </style>
 </head>
 <body>
+  <!-- Drop Zone Overlay -->
+  <div class="drop-zone-overlay" id="drop-zone-overlay">
+    <div class="drop-zone-box">
+      <div class="icon">📎</div>
+      <div class="text">Drop files here</div>
+      <div class="subtext">PDFs, images, documents</div>
+    </div>
+  </div>
+
   <!-- Hidden file input for KR attachments -->
   <input type="file" id="kr-file-input" style="display:none;" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onchange="handleKRFileUpload(event)">
   
@@ -3797,11 +3819,261 @@ function stopVoiceInput(btn, targetEl, originalPlaceholder) {
 }
 
 // ============================================
+// DRAG AND DROP
+// ============================================
+let dragCounter = 0;
+
+function setupDragAndDrop() {
+  const body = document.body;
+  const overlay = document.getElementById('drop-zone-overlay');
+  
+  // Prevent default drag behaviors
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    body.addEventListener(eventName, preventDefaults, false);
+  });
+  
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  // Show overlay when dragging files
+  body.addEventListener('dragenter', (e) => {
+    dragCounter++;
+    if (e.dataTransfer.types.includes('Files')) {
+      overlay.classList.add('active');
+    }
+  });
+  
+  body.addEventListener('dragleave', (e) => {
+    dragCounter--;
+    if (dragCounter === 0) {
+      overlay.classList.remove('active');
+    }
+  });
+  
+  body.addEventListener('drop', (e) => {
+    dragCounter = 0;
+    overlay.classList.remove('active');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleDroppedFiles(files);
+    }
+  });
+}
+
+async function handleDroppedFiles(files) {
+  // Check if KR modal is open
+  const krModal = document.getElementById('kr-modal');
+  if (krModal && krModal.classList.contains('active') && currentOKRId && currentKRIndex !== null) {
+    await handleDroppedFilesForKR(files);
+    return;
+  }
+  
+  // Check if folder modal is open
+  const folderModal = document.getElementById('folder-detail-modal');
+  if (folderModal && folderModal.classList.contains('active') && currentFolderId) {
+    await handleDroppedFilesForFolder(files);
+    return;
+  }
+  
+  // Check if AI panel is open
+  const aiPanel = document.getElementById('ai-panel');
+  if (aiPanel && aiPanel.classList.contains('active')) {
+    await handleDroppedFilesForAI(files);
+    return;
+  }
+  
+  // No specific context - ask user what to do
+  const choice = prompt(
+    `You dropped ${files.length} file(s). Where would you like to add them?\n\n` +
+    `1 - Create a new folder with these files\n` +
+    `2 - Cancel\n\n` +
+    `Enter 1 or 2:`
+  );
+  
+  if (choice === '1') {
+    createFolderWithFiles(files);
+  }
+}
+
+async function handleDroppedFilesForKR(files) {
+  const okr = data.okrs.find(o => o.id === currentOKRId);
+  if (!okr || currentKRIndex === null) return;
+  
+  const kr = okr.keyresults[currentKRIndex];
+  if (!kr.attachments) kr.attachments = [];
+  
+  for (let file of files) {
+    await processFileForAttachment(file, kr, currentKRIndex);
+  }
+  
+  saveLocal();
+  render();
+}
+
+async function handleDroppedFilesForFolder(files) {
+  const folder = data.folders.find(f => f.id === currentFolderId);
+  if (!folder) return;
+  if (!folder.items) folder.items = [];
+  
+  for (let file of files) {
+    const item = await processFileForFolder(file);
+    if (item) {
+      folder.items.push(item);
+    }
+  }
+  
+  saveLocal();
+  renderFolderDetail(currentFolderId);
+  alert(`Added ${files.length} file(s) to "${folder.name}"`);
+}
+
+async function handleDroppedFilesForAI(files) {
+  // Add files to AI context for discussion
+  let fileContents = [];
+  
+  for (let file of files) {
+    if (file.type === 'application/pdf') {
+      const arrayBuffer = await file.arrayBuffer();
+      const text = await extractPDFText(arrayBuffer);
+      if (text) {
+        fileContents.push(`[PDF: ${file.name}]\n${text.substring(0, 10000)}`);
+      }
+    } else if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
+      const text = await file.text();
+      fileContents.push(`[File: ${file.name}]\n${text.substring(0, 10000)}`);
+    } else if (file.type.startsWith('image/')) {
+      fileContents.push(`[Image: ${file.name}] (Image uploaded - describe what you'd like to know about it)`);
+    }
+  }
+  
+  if (fileContents.length > 0) {
+    const input = document.getElementById('ai-chat-input');
+    input.value = `I've uploaded these files:\n\n${fileContents.join('\n\n')}\n\nPlease analyze them.`;
+    input.focus();
+    alert('Files added to AI chat. Press Enter to send.');
+  }
+}
+
+async function processFileForAttachment(file, kr, krIndex) {
+  if (file.size > 5 * 1024 * 1024) {
+    alert(`File "${file.name}" is too large. Max 5MB per file.`);
+    return;
+  }
+  
+  if (file.type === 'application/pdf') {
+    const arrayBuffer = await file.arrayBuffer();
+    const extractedText = await extractPDFText(arrayBuffer);
+    
+    if (extractedText) {
+      kr.attachments.push({
+        name: file.name,
+        type: 'application/pdf',
+        size: file.size,
+        extractedText: extractedText.substring(0, 50000),
+        uploadedBy: currentUser,
+        uploadedAt: new Date().toISOString()
+      });
+    }
+  } else if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+    const text = await file.text();
+    kr.attachments.push({
+      name: file.name,
+      type: 'text/plain',
+      size: file.size,
+      extractedText: text.substring(0, 50000),
+      uploadedBy: currentUser,
+      uploadedAt: new Date().toISOString()
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      kr.attachments.push({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: e.target.result,
+        uploadedBy: currentUser,
+        uploadedAt: new Date().toISOString()
+      });
+      const attEl = document.getElementById(`kr-att-${krIndex}`);
+      if (attEl) attEl.innerHTML = renderKRAttachments(kr.attachments, krIndex);
+    };
+    reader.readAsDataURL(file);
+  }
+  
+  const attEl = document.getElementById(`kr-att-${krIndex}`);
+  if (attEl) attEl.innerHTML = renderKRAttachments(kr.attachments, krIndex);
+}
+
+async function processFileForFolder(file) {
+  if (file.size > 5 * 1024 * 1024) {
+    alert(`File "${file.name}" is too large. Max 5MB per file.`);
+    return null;
+  }
+  
+  let content = '';
+  let fileData = null;
+  
+  if (file.type === 'application/pdf') {
+    const arrayBuffer = await file.arrayBuffer();
+    content = await extractPDFText(arrayBuffer) || '';
+    content = content.substring(0, 50000);
+  } else if (file.type.startsWith('text/') || file.name.endsWith('.txt')) {
+    content = await file.text();
+    content = content.substring(0, 50000);
+  } else if (file.type.startsWith('image/')) {
+    fileData = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    });
+  }
+  
+  return {
+    id: 'item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    name: file.name,
+    type: file.type.startsWith('image/') ? 'image' : file.type === 'application/pdf' ? 'pdf' : 'text',
+    content: content,
+    data: fileData,
+    addedAt: new Date().toISOString()
+  };
+}
+
+async function createFolderWithFiles(files) {
+  const folderName = prompt('Enter a name for the new folder:', `Files ${new Date().toLocaleDateString()}`);
+  if (!folderName) return;
+  
+  const folder = {
+    id: 'folder_' + Date.now(),
+    name: folderName,
+    description: `Created from ${files.length} dropped file(s)`,
+    items: [],
+    createdAt: new Date().toISOString()
+  };
+  
+  for (let file of files) {
+    const item = await processFileForFolder(file);
+    if (item) folder.items.push(item);
+  }
+  
+  data.folders.push(folder);
+  saveLocal();
+  renderFolders();
+  alert(`Created folder "${folderName}" with ${folder.items.length} file(s)`);
+}
+
+// ============================================
 // INITIALIZATION
 // ============================================
 async function init() {
   try {
     document.getElementById('current-user').textContent = currentUser;
+    
+    // Setup drag and drop
+    setupDragAndDrop();
     
     // ALWAYS load local first and render immediately
     loadLocal();
