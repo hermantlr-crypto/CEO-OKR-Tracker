@@ -629,7 +629,11 @@
   <!-- Expenses Tab -->
   <div id="expenses" class="tab-content">
     <div class="expense-summary" id="expense-summary"></div>
-    <div class="add-btn" onclick="showAddExpenseModal()" style="margin-bottom: 16px;">+ Add Expense</div>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;">
+      <div class="add-btn" onclick="showAddExpenseModal()">+ Add Expense</div>
+      <button onclick="exportExpensesToCSV()" style="padding: 10px 16px; background: rgba(46,204,113,0.2); border: 1px solid rgba(46,204,113,0.3); border-radius: 8px; color: #2ecc71; cursor: pointer; font-size: 14px;">📊 Export CSV</button>
+      <button onclick="exportFinancialReportPDF()" style="padding: 10px 16px; background: rgba(231,76,60,0.2); border: 1px solid rgba(231,76,60,0.3); border-radius: 8px; color: #e74c3c; cursor: pointer; font-size: 14px;">📄 Export PDF</button>
+    </div>
     <table class="expense-table">
       <thead>
         <tr>
@@ -1576,7 +1580,8 @@ function exportData() {
     },
     settings: {
       apiUrl: API_URL,
-      currentUser: currentUser
+      currentUser: currentUser,
+      anthropicApiKey: ANTHROPIC_API_KEY
     }
   };
   
@@ -1630,11 +1635,28 @@ function importData(event) {
         data.expenses = mergeArraysById(data.expenses || [], imported.data.expenses);
       }
       
+      // Restore settings including API key
+      if (imported.settings) {
+        if (imported.settings.anthropicApiKey) {
+          ANTHROPIC_API_KEY = imported.settings.anthropicApiKey;
+          localStorage.setItem('anthropic_api_key', ANTHROPIC_API_KEY);
+        }
+        if (imported.settings.apiUrl && !API_URL) {
+          API_URL = imported.settings.apiUrl;
+          localStorage.setItem('afp_api_url', API_URL);
+        }
+        if (imported.settings.currentUser) {
+          currentUser = imported.settings.currentUser;
+          localStorage.setItem('current_user', currentUser);
+          document.getElementById('current-user').textContent = currentUser;
+        }
+      }
+      
       saveLocal();
       render();
       closeModal('app-settings-modal');
       
-      alert('Data imported successfully!');
+      alert('Data imported successfully!' + (imported.settings?.anthropicApiKey ? ' AI key restored.' : ''));
     } catch (err) {
       alert('Error reading backup file: ' + err.message);
     }
@@ -4791,13 +4813,217 @@ function addChatMessage(role, content) {
     lastAIResponse = content;
   }
   
-  // Add save button for AI responses
-  const saveBtn = role === 'assistant' ? `<button onclick="showSaveToFolderModal()" style="margin-top:8px;padding:4px 10px;background:rgba(155,89,182,0.2);border:none;border-radius:12px;color:#9b59b6;cursor:pointer;font-size:11px;">📁 Save to folder</button>` : '';
+  // Add save and export buttons for AI responses
+  const exportBtns = role === 'assistant' ? `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button onclick="showSaveToFolderModal()" style="padding:4px 10px;background:rgba(155,89,182,0.2);border:none;border-radius:12px;color:#9b59b6;cursor:pointer;font-size:11px;">📁 Save</button>
+      <button onclick="exportAIResponseToPDF()" style="padding:4px 10px;background:rgba(231,76,60,0.2);border:none;border-radius:12px;color:#e74c3c;cursor:pointer;font-size:11px;">📄 PDF</button>
+      <button onclick="exportAIResponseToCSV()" style="padding:4px 10px;background:rgba(46,204,113,0.2);border:none;border-radius:12px;color:#2ecc71;cursor:pointer;font-size:11px;">📊 CSV</button>
+      <button onclick="copyAIResponse()" style="padding:4px 10px;background:rgba(52,152,219,0.2);border:none;border-radius:12px;color:#3498db;cursor:pointer;font-size:11px;">📋 Copy</button>
+    </div>` : '';
   
-  div.innerHTML = `<div style="width:36px;height:36px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;">${avatar}</div><div style="max-width:80%;"><div style="padding:12px 16px;border-radius:12px;background:${msgBg};font-size:14px;line-height:1.5;white-space:pre-wrap;">${content}</div>${saveBtn}</div>`;
+  div.innerHTML = `<div style="width:36px;height:36px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;">${avatar}</div><div style="max-width:80%;"><div style="padding:12px 16px;border-radius:12px;background:${msgBg};font-size:14px;line-height:1.5;white-space:pre-wrap;">${content}</div>${exportBtns}</div>`;
   
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+// Copy AI response to clipboard
+function copyAIResponse() {
+  if (!lastAIResponse) {
+    alert('No AI response to copy.');
+    return;
+  }
+  navigator.clipboard.writeText(lastAIResponse).then(() => {
+    alert('Copied to clipboard!');
+  }).catch(err => {
+    console.error('Copy failed:', err);
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = lastAIResponse;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Copied to clipboard!');
+  });
+}
+
+// Export AI response to PDF
+function exportAIResponseToPDF() {
+  if (!lastAIResponse) {
+    alert('No AI response to export.');
+    return;
+  }
+  
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>AFP Tracker Report - ${dateStr}</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #333; border-bottom: 2px solid #4facfe; padding-bottom: 10px; }
+        .meta { color: #666; font-size: 12px; margin-bottom: 20px; }
+        .content { white-space: pre-wrap; background: #f5f5f5; padding: 20px; border-radius: 8px; }
+        @media print { body { margin: 20px; } }
+      </style>
+    </head>
+    <body>
+      <h1>📊 AFP Performance Report</h1>
+      <div class="meta">Generated: ${dateStr} at ${timeStr}</div>
+      <div class="content">${lastAIResponse.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+    </body>
+    </html>
+  `;
+  
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  win.onload = () => {
+    win.print();
+  };
+}
+
+// Export AI response to CSV (attempts to parse tables/data)
+function exportAIResponseToCSV() {
+  if (!lastAIResponse) {
+    alert('No AI response to export.');
+    return;
+  }
+  
+  let csvContent = '';
+  
+  // Try to extract tabular data from the response
+  const lines = lastAIResponse.split('\n');
+  
+  // Check for bullet points or list items
+  const listItems = lines.filter(l => l.match(/^[\-\•\*]\s|^\d+\./));
+  
+  if (listItems.length > 0) {
+    csvContent = 'Item,Details\n';
+    listItems.forEach((item, i) => {
+      const cleaned = item.replace(/^[\-\•\*]\s*|\d+\.\s*/, '').trim();
+      csvContent += `"${i + 1}","${cleaned.replace(/"/g, '""')}"\n`;
+    });
+  } else {
+    // Just export as plain text with line numbers
+    csvContent = 'Line,Content\n';
+    lines.forEach((line, i) => {
+      if (line.trim()) {
+        csvContent += `"${i + 1}","${line.trim().replace(/"/g, '""')}"\n`;
+      }
+    });
+  }
+  
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `AFP_Report_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Export expenses to CSV
+function exportExpensesToCSV() {
+  if (!data.expenses || data.expenses.length === 0) {
+    alert('No expenses to export.');
+    return;
+  }
+  
+  let csv = 'Date,Description,Amount,Category,Trip\n';
+  data.expenses.forEach(e => {
+    csv += `"${e.date}","${(e.description || '').replace(/"/g, '""')}","${e.amount}","${e.category || ''}","${(e.trip || '').replace(/"/g, '""')}"\n`;
+  });
+  
+  const total = data.expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  csv += `\n"","TOTAL","${total.toFixed(2)}","",""\n`;
+  
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `AFP_Expenses_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Export financial report to PDF
+function exportFinancialReportPDF() {
+  const total = (data.expenses || []).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const byCategory = {};
+  (data.expenses || []).forEach(e => {
+    byCategory[e.category || 'Other'] = (byCategory[e.category || 'Other'] || 0) + (parseFloat(e.amount) || 0);
+  });
+  
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  
+  let categoryRows = '';
+  Object.entries(byCategory).sort((a, b) => b[1] - a[1]).forEach(([cat, amt]) => {
+    categoryRows += `<tr><td>${cat}</td><td style="text-align:right;">$${amt.toFixed(2)}</td></tr>`;
+  });
+  
+  let expenseRows = '';
+  (data.expenses || []).sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(e => {
+    expenseRows += `<tr><td>${e.date}</td><td>${e.description}</td><td>${e.category}</td><td style="text-align:right;">$${parseFloat(e.amount).toFixed(2)}</td></tr>`;
+  });
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>AFP Financial Report - ${dateStr}</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
+        h1 { color: #333; border-bottom: 2px solid #4facfe; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 30px; }
+        .summary { background: #f0f7ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .summary .total { font-size: 32px; font-weight: bold; color: #4facfe; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; font-weight: 600; }
+        .meta { color: #666; font-size: 12px; }
+        @media print { body { margin: 20px; } }
+      </style>
+    </head>
+    <body>
+      <h1>💰 AFP Financial Report</h1>
+      <div class="meta">Generated: ${dateStr}</div>
+      
+      <div class="summary">
+        <div>Total Expenses</div>
+        <div class="total">$${total.toFixed(2)}</div>
+        <div style="margin-top:10px;">${(data.expenses || []).length} transactions</div>
+      </div>
+      
+      <h2>By Category</h2>
+      <table>
+        <tr><th>Category</th><th style="text-align:right;">Amount</th></tr>
+        ${categoryRows}
+        <tr style="font-weight:bold;border-top:2px solid #333;"><td>TOTAL</td><td style="text-align:right;">$${total.toFixed(2)}</td></tr>
+      </table>
+      
+      <h2>All Transactions</h2>
+      <table>
+        <tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right;">Amount</th></tr>
+        ${expenseRows}
+      </table>
+    </body>
+    </html>
+  `;
+  
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  win.onload = () => {
+    win.print();
+  };
 }
 
 function showSaveToFolderModal() {
