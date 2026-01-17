@@ -2832,12 +2832,18 @@ function parseCopilotSchedule(text) {
   
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                       'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthAbbrev = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   
-  // Helper to parse date like "Monday, January 12, 2026"
+  // Helper to parse date like "Monday, January 12, 2026" or "Monday, Jan 12, 2026"
   function parseDate(line) {
     const dateMatch = line.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(\w+)\s+(\d+),?\s+(\d{4})/i);
     if (dateMatch) {
-      const month = monthNames.indexOf(dateMatch[1]);
+      let month = monthNames.indexOf(dateMatch[1]);
+      // Try abbreviated month names if full name not found
+      if (month === -1) {
+        month = monthAbbrev.indexOf(dateMatch[1]);
+      }
       const day = parseInt(dateMatch[2]);
       const year = parseInt(dateMatch[3]);
       if (month >= 0 && day > 0 && year > 2000) {
@@ -2847,9 +2853,15 @@ function parseCopilotSchedule(text) {
     return null;
   }
   
-  // Helper to parse time like "8:00 AM – 9:00 AM"
+  // Helper to parse time like "8:00 AM – 9:00 AM" with or without "Time:" prefix
   function parseTime(line) {
-    const timeMatch = line.match(/Time:\s*(\d{1,2}:\d{2}\s*(?:AM|PM))\s*[–-]\s*(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    // Match with "Time:" prefix
+    let timeMatch = line.match(/Time:\s*(\d{1,2}:\d{2}\s*(?:AM|PM))\s*[–-]\s*(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    if (timeMatch) {
+      return { start: timeMatch[1].trim(), end: timeMatch[2].trim() };
+    }
+    // Match standalone time (no "Time:" prefix)
+    timeMatch = line.match(/^(\d{1,2}:\d{2}\s*(?:AM|PM))\s*[–-]\s*(\d{1,2}:\d{2}\s*(?:AM|PM))$/i);
     if (timeMatch) {
       return { start: timeMatch[1].trim(), end: timeMatch[2].trim() };
     }
@@ -2885,8 +2897,10 @@ function parseCopilotSchedule(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // Skip empty lines in non-invitation context
-    if (!line && !inFullInvitation) continue;
+    // Skip empty lines and separator lines (like "----")
+    if (!line || /^-+$/.test(line)) {
+      if (!inFullInvitation) continue;
+    }
     
     // Check for date line
     const newDate = parseDate(line);
@@ -2896,12 +2910,27 @@ function parseCopilotSchedule(text) {
       continue;
     }
     
-    // Check for time line - this usually follows the event title
+    // Check for time line - can appear with or without event already started
     const timeInfo = parseTime(line);
-    if (timeInfo && currentEvent) {
-      currentEvent.time = timeInfo.start + ' - ' + timeInfo.end;
-      currentEvent.startTime = timeInfo.start;
-      currentEvent.endTime = timeInfo.end;
+    if (timeInfo) {
+      if (currentEvent) {
+        // Time for existing event
+        currentEvent.time = timeInfo.start + ' - ' + timeInfo.end;
+        currentEvent.startTime = timeInfo.start;
+        currentEvent.endTime = timeInfo.end;
+      } else if (currentDate && i > 0) {
+        // Standalone time after a title - previous line was likely the title
+        const prevLine = lines[i-1].trim();
+        if (prevLine && !prevLine.match(/^-+$/) && !parseDate(prevLine)) {
+          saveCurrentEvent();
+          currentEvent = { 
+            title: prevLine,
+            time: timeInfo.start + ' - ' + timeInfo.end,
+            startTime: timeInfo.start,
+            endTime: timeInfo.end
+          };
+        }
+      }
       continue;
     }
     
@@ -2917,9 +2946,34 @@ function parseCopilotSchedule(text) {
       continue;
     }
     
+    // Check for Meeting ID
+    if (line.match(/Meeting ID:/i) && currentEvent) {
+      if (!currentEvent.notes) currentEvent.notes = '';
+      currentEvent.notes += (currentEvent.notes ? '\n' : '') + line;
+      continue;
+    }
+    
+    // Check for Status
+    if (line.startsWith('Status:') && currentEvent) {
+      currentEvent.status = line.replace('Status:', '').trim();
+      continue;
+    }
+    
+    // Check for Category
+    if (line.startsWith('Category:') && currentEvent) {
+      currentEvent.category = line.replace('Category:', '').trim();
+      continue;
+    }
+    
     // Check for invitees section
     if (line.startsWith('Invitees:') && currentEvent) {
       currentEvent.invitees = [];
+      const inviteesText = line.replace('Invitees:', '').trim();
+      if (inviteesText) {
+        // Split by semicolon or comma
+        const inviteesList = inviteesText.split(/[;,]/).map(i => i.trim()).filter(i => i);
+        currentEvent.invitees.push(...inviteesList);
+      }
       continue;
     }
     
@@ -2940,8 +2994,8 @@ function parseCopilotSchedule(text) {
     }
     
     // Check for conflicts
-    if (line.startsWith('Conflicts:') && currentEvent) {
-      currentEvent.conflicts = line.replace('Conflicts:', '').trim();
+    if (line.startsWith('Conflicts with:') && currentEvent) {
+      currentEvent.conflicts = line.replace('Conflicts with:', '').trim();
       continue;
     }
     
@@ -2955,7 +3009,7 @@ function parseCopilotSchedule(text) {
     // If in Full Invitation, collect text until next event
     if (inFullInvitation) {
       // Check if this looks like a new event title (line after a date, before Time:)
-      if (currentDate && lines[i+1] && lines[i+1].trim().startsWith('Time:')) {
+      if (currentDate && lines[i+1] && (lines[i+1].trim().startsWith('Time:') || parseTime(lines[i+1].trim()))) {
         inFullInvitation = false;
         saveCurrentEvent();
         currentEvent = { title: line };
@@ -2966,12 +3020,17 @@ function parseCopilotSchedule(text) {
     }
     
     // If we have a date and this isn't a known field, it might be an event title
-    if (currentDate && line && !line.includes(':') && !line.startsWith('•') && !line.startsWith('_')) {
-      // Check if next line is Time: to confirm this is a title
+    // But only if it's not just a separator line and looks like actual content
+    if (currentDate && line && !line.includes(':') && !line.startsWith('•') && !line.startsWith('_') && !/^-+$/.test(line)) {
+      // Check if next line is Time: or a time pattern to confirm this is a title
       const nextLine = lines[i+1] ? lines[i+1].trim() : '';
-      if (nextLine.startsWith('Time:') || (i > 0 && parseDate(lines[i-1]))) {
-        saveCurrentEvent();
-        currentEvent = { title: line };
+      const nextLineTime = parseTime(nextLine);
+      if (nextLine.startsWith('Time:') || nextLineTime || (i > 0 && parseDate(lines[i-1]))) {
+        // Don't save if this looks like it might be a continuation of event details
+        if (!currentEvent || (currentEvent && currentEvent.time)) {
+          saveCurrentEvent();
+          currentEvent = { title: line };
+        }
       }
     }
   }
